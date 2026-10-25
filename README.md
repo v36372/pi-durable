@@ -12,8 +12,15 @@ MCP and codemode remain absent for the first self-modification tests.
 
 1. Ask: "Read AGENTS.md and docs/extensions.md. List your current tools."
 2. Ask for one small extension. Require a test and an invocation of the new tool.
-3. Confirm the registry updates automatically. The conversation remains intact.
+3. Open Session to confirm the registry updates automatically. The conversation remains intact.
 4. Ask for MCP or codemode when you want the next experiment.
+
+## Chat interface
+
+The single-column chat uses square controls and collapses tool activity into work groups.
+Expand a work group for tool inputs, outputs, and errors. Session contains runtime details, the registry, and diagnostics.
+Agent replies support headings, lists, bold text, inline code, code blocks, and HTTP links. Raw HTML remains plain text.
+Tables and nested Markdown remain outside this renderer's scope.
 
 ## Local use
 
