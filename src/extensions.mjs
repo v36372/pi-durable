@@ -1,8 +1,32 @@
+import { watch } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createRegistry } from '@earendil-works/pi-durable';
+
+export async function watchExtensions(registry, directory, onStatus) {
+  const reload = extensionLoader(registry, directory);
+  let closed = false;
+  let timer;
+  let pending = Promise.resolve();
+  const refresh = () => {
+    if (closed) return pending;
+    pending = reload().then(() => onStatus(), onStatus);
+    return pending;
+  };
+  const watcher = watch(directory, { persistent: false }, (_event, file) => {
+    if (file && !file.endsWith('.mjs')) return;
+    clearTimeout(timer);
+    timer = setTimeout(refresh, 150);
+  });
+  watcher.on('error', onStatus);
+  await refresh();
+  return {
+    refresh,
+    async close() { closed = true; watcher.close(); clearTimeout(timer); await pending; },
+  };
+}
 
 export function extensionLoader(registry, directory) {
   const base = registry.snapshot().installed();

@@ -5,14 +5,14 @@ The application runs on v36372-agent, a private VM from ghcr.io/boldsoftware/exe
 
 This prototype gives one owner a persistent chat, code tools, and editable extensions.
 The agent works in its own repository. It can change tools, its browser interface, and its server.
-The initial tools are read, write, edit, bash, reload_extensions, and restart_agent.
+The initial tools are read, write, edit, bash, and restart. Extension and UI edits apply automatically.
 MCP and codemode remain absent for the first self-modification tests.
 
 ## Try it
 
 1. Ask: "Read AGENTS.md and docs/extensions.md. List your current tools."
-2. Ask for one small extension. Require a test, a reload, and an invocation of the new tool.
-3. Refresh the page. Confirm the conversation remains and the registry shows the tool.
+2. Ask for one small extension. Require a test and an invocation of the new tool.
+3. Confirm the registry updates automatically. The conversation remains intact.
 4. Ask for MCP or codemode when you want the next experiment.
 
 ## Local use
@@ -33,9 +33,9 @@ AGENT_STATE_DIR defaults to ~/.local/state/durable-agent. PORT defaults to 8787.
 ## Implementation
 
 - src/agent.mjs: Pi Durable harness, SQLite, prompt, code tools, restart coordination.
-- src/extensions.mjs: explicit reload with validation before registry changes.
+- src/extensions.mjs: automatic reload with validation before registry changes.
 - src/server.mjs and src/http.mjs: one private HTTP API with origin and body validation.
-- web/: plain JavaScript and CSS. The browser reads committed state every second.
+- web/: plain JavaScript and CSS. The browser reads committed state every second and refreshes after UI edits.
 - test/: code-tool, deduplication, extension, HTTP boundary, and SIGKILL recovery checks.
 
 See docs/extensions.md for the extension contract and AGENTS.md for the agent's change procedure.
@@ -65,9 +65,11 @@ sudo journalctl -u durable-agent -n 100 --no-pager
 sudo systemctl restart durable-agent
 ```
 
-Use restart_agent from chat after core changes. It checks syntax and tests before its result triggers process exit.
-For extension-only changes, use reload_extensions. Imported helper changes require a full restart.
-For browser edits, refresh the page.
+Use restart from chat after core changes. It checks syntax and tests before its result triggers process exit.
+Extension entry files reload automatically. Invalid saves preserve the previous registry and show an error.
+Imported helper or dependency changes still require restart. Tests do not gate automatic extension activation.
+Browser edits trigger an automatic refresh after the next poll. Per-tab drafts survive through sessionStorage.
+If browser storage fails, automatic refresh stops to protect the draft. Save the draft before a manual refresh.
 
 If core edits prevent startup, open the VM terminal and inspect the journal plus git diff.
 Restore only the broken files from a known-good commit. Then run npm run check and npm test.

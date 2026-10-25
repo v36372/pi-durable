@@ -4,12 +4,12 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { Type } from '@earendil-works/pi-ai';
-import { Harness, createRegistry, defineExtension, defineTool, section } from '@earendil-works/pi-durable';
+import { Harness, createRegistry, defineExtension, defineTool, section, hook, ToolTask } from '@earendil-works/pi-durable';
 import { CodingTools } from '@earendil-works/pi-durable/tools';
 import { NodeExecutionEnv } from '@earendil-works/pi-durable/env/node';
 import { SqliteStorage } from '@earendil-works/pi-durable/storage/sqlite';
 import { openNodeSqliteDatabase } from '@earendil-works/pi-durable/storage/sqlite/node';
-import { extensionLoader } from './extensions.mjs';
+import { watchExtensions } from './extensions.mjs';
 
 export const context = BACKGROUND_CONTEXT;
 const run = promisify(execFile);
@@ -20,7 +20,8 @@ export async function openAgent({ workspace, stateDir, models, modelId = 'gpt-5.
   await mkdir(join(workspace, 'extensions'), { recursive: true });
   const registry = createRegistry();
   registry.install(CodingTools);
-  let reload;
+  let extensions;
+  let extensionError;
   let restartCall;
   const reports = [];
   const report = (error, info = {}) => {
@@ -30,11 +31,17 @@ export async function openAgent({ workspace, stateDir, models, modelId = 'gpt-5.
   };
   registry.install(defineExtension({
     name: 'host',
-    sections: [section('workspace', () => workspace), section('project', () => readFile(join(workspace, 'AGENTS.md'), 'utf8'), { tag: false })],
+    sections: [
+      section('workspace', () => workspace),
+      section('project', () => readFile(join(workspace, 'AGENTS.md'), 'utf8'), { tag: false }),
+      section('extension_error', () => extensionError),
+    ],
+    hooks: [hook(ToolTask, { afterTool: async call => {
+      // Publish edits before the next model request, not just after the watcher debounce.
+      if (['write', 'edit', 'bash'].includes(call.name)) await extensions.refresh();
+    } })],
     tools: [
-      defineTool({ name: 'reload_extensions', description: 'Validate and load extensions/*.mjs. A failed batch leaves the live registry unchanged.', parameters: Type.Object({}), replay: 'safe',
-        execute: async () => output(JSON.stringify(await reload())) }),
-      defineTool({ name: 'restart_agent', description: 'Check source and tests, then restart this process after this tool result commits. The conversation resumes. Use after core edits, not extension-only edits.', parameters: Type.Object({}), replay: 'safe', callers: ['model'],
+      defineTool({ name: 'restart', description: 'Check source and tests, then restart this process after this tool result commits. The conversation resumes. Use after core edits, not extension-only edits.', parameters: Type.Object({}), replay: 'safe', callers: ['model'],
         execute: async (_args, api) => {
           await run('npm', ['run', 'check'], { cwd: workspace, timeout: 120000, maxBuffer: 1024 * 1024 });
           await run('npm', ['test'], { cwd: workspace, timeout: 120000, maxBuffer: 1024 * 1024 });
@@ -43,9 +50,11 @@ export async function openAgent({ workspace, stateDir, models, modelId = 'gpt-5.
         } }),
     ],
   }));
-  reload = extensionLoader(registry, join(workspace, 'extensions'));
   // A broken extension must not take the repair tools or chat offline.
-  try { await reload(); } catch (error) { report(error, { type: 'extension_load' }); }
+  extensions = await watchExtensions(registry, join(workspace, 'extensions'), error => {
+    extensionError = error ? 'Automatic extension reload failed. The prior registry remains active. ' + error.message : undefined;
+    if (error) report(error, { type: 'extension_load' });
+  });
   const database = await openNodeSqliteDatabase(join(stateDir, 'session.sqlite'));
   await database.exec('PRAGMA synchronous = FULL');
   const harness = await Harness.open(await SqliteStorage.open(database), {
@@ -65,8 +74,9 @@ export async function openAgent({ workspace, stateDir, models, modelId = 'gpt-5.
     }
   });
   return {
-    harness, root, registry, reload, reports,
+    harness, root, registry, reports,
+    get extensionError() { return extensionError; },
     get view() { return view; },
-    async close() { await harness.close(context); await watch.stop(); },
+    async close() { await extensions.close(); await harness.close(context); await watch.stop(); },
   };
 }
