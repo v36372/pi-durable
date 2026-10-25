@@ -5,7 +5,10 @@ export class HttpError extends Error {
 export function authorize(request, origin) {
   if (request.headers.host !== new URL(origin).host) throw new HttpError(403, 'Unrecognized host');
   if (request.headers.origin && request.headers.origin !== origin) throw new HttpError(403, 'Cross-origin request denied');
-  if (request.headers['sec-fetch-site'] === 'cross-site') throw new HttpError(403, 'Cross-site request denied');
+  // Links and login redirects can navigate across sites. Only the chat document gets this exception.
+  const pageNavigation = request.method === 'GET' && new URL(request.url, origin).pathname === '/' &&
+    request.headers['sec-fetch-mode'] === 'navigate' && request.headers['sec-fetch-dest'] === 'document';
+  if (request.headers['sec-fetch-site'] === 'cross-site' && !pageNavigation) throw new HttpError(403, 'Cross-site request denied');
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     if (request.headers.origin !== origin) throw new HttpError(403, 'Origin required');
     if (request.headers['content-type']?.split(';')[0] !== 'application/json') throw new HttpError(415, 'JSON required');
