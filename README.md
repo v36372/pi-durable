@@ -19,12 +19,10 @@ MCP and codemode remain absent for the first self-modification tests.
 
 Requires Linux, Node 24 or later, and access to an exe.dev LLM integration.
 
-
 ```sh
 npm ci --ignore-scripts
 npm test
 npm start
-
 ```
 
 Open http://127.0.0.1:8787. The default model is gpt-5.5 through https://llm.int.exe.xyz/v1.
@@ -41,7 +39,6 @@ AGENT_STATE_DIR defaults to ~/.local/state/durable-agent. PORT defaults to 8787.
 - test/: code-tool, deduplication, extension, HTTP boundary, and SIGKILL recovery checks.
 
 See docs/extensions.md for the extension contract and AGENTS.md for the agent's change procedure.
-All application prose and code originate in this project. No reference repository files are included.
 
 ## Durability and limits
 
@@ -62,12 +59,10 @@ This first version omits celld, object storage, and a host-tool bridge. A future
 
 ## Operations
 
-
 ```sh
 sudo systemctl status durable-agent
 sudo journalctl -u durable-agent -n 100 --no-pager
 sudo systemctl restart durable-agent
-
 ```
 
 Use restart_agent from chat after core changes. It checks syntax and tests before its result triggers process exit.

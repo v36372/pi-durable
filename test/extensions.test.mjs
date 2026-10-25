@@ -27,6 +27,9 @@ test('extension reload replaces code, retains the live batch on error, and remov
   assert.equal(registry.snapshot().extension('echo-extension'), second);
   await writeFile(join(directory, 'broken.mjs'), source('host', 'bad'));
   await assert.rejects(reload(), /reserved extension/);
+  await writeFile(join(directory, 'broken.mjs'), "export default {name:'broken', tools:[{name:'oops'}]}");
+  await assert.rejects(reload(), /execute function/);
+  assert.equal(registry.snapshot().extension('echo-extension'), second);
   await rm(join(directory, 'broken.mjs'));
   await rm(file);
   await reload();

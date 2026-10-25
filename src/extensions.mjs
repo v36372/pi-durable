@@ -25,6 +25,10 @@ export function extensionLoader(registry, directory) {
         if (names.has(extension.name)) throw new Error('Duplicate or reserved extension name: ' + extension.name);
         names.add(extension.name);
         for (const tool of extension.tools ?? []) {
+          if (!tool || typeof tool.name !== 'string' || !/^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$/.test(tool.name) ||
+              typeof tool.description !== 'string' || tool.parameters?.type !== 'object' || typeof tool.execute !== 'function') {
+            throw new Error('Each tool needs a valid name, description, object schema, and execute function');
+          }
           if (tools.has(tool.name)) throw new Error('Duplicate or reserved tool: ' + tool.name);
           tools.add(tool.name);
         }

@@ -15,6 +15,30 @@ test('gateway uses the VM integration, not an external provider URL', async () =
   assert.equal((await models.getAuth(model)).auth.apiKey, 'implicit');
 });
 
+test('restart callback observes its committed tool result', { timeout: 15000 }, async t => {
+  const workspace = await mkdtemp(join(tmpdir(), 'agent-restart-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  await writeFile(join(workspace, 'AGENTS.md'), 'Test restart.');
+  await writeFile(join(workspace, 'package.json'), JSON.stringify({ scripts: { check: 'node -e "process.exit(0)"', test: 'node -e "process.exit(0)"' } }));
+  const faux = fauxProvider({ tokensPerSecond: 100000 });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  faux.setResponses([
+    fauxAssistantMessage(fauxToolCall('restart_agent', {}), { stopReason: 'toolUse' }),
+    fauxAssistantMessage('After restart.'),
+  ]);
+  const restarted = Promise.withResolvers();
+  const agent = await openAgent({ workspace, stateDir: join(workspace, 'state'), models, provider: 'faux', modelId: 'faux-1',
+    onRestart: () => restarted.resolve(agent.view.entries.flatMap(entry => entry.model ?? []).find(message => message.toolName === 'restart_agent')),
+  });
+  try {
+    await agent.root.submit({ type: 'input', content: 'Restart once' }, context);
+    const result = await restarted.promise;
+    assert.equal(result.isError, false);
+    assert.match(result.content[0].text, /Checks passed/);
+  } finally { await agent.close(); }
+});
+
 test('coding tools work and SQLite reopens with request deduplication', async t => {
   const workspace = await mkdtemp(join(tmpdir(), 'agent-tools-'));
   t.after(() => rm(workspace, { recursive: true, force: true }));

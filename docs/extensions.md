@@ -4,7 +4,6 @@ Create extensions/<name>.mjs. Export one Pi Durable extension as default.
 The host loads these modules at startup and through reload_extensions or the UI button.
 All conversations select installed extensions by default. This prototype has one root conversation.
 
-
 defineTool validates arguments against its TypeBox schema. Tools can return text, structured results, and UI details.
 
 ```js
