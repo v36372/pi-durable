@@ -33,6 +33,7 @@ Requires Linux, Node 24 or later, and access to an exe.dev LLM integration.
 
 ```sh
 npm ci --ignore-scripts
+npm run check
 npm test
 npm start
 ```
@@ -45,13 +46,25 @@ AGENT_STATE_DIR defaults to ~/.local/state/durable-agent. PORT defaults to 8787.
 
 ## Implementation
 
-- src/agent.mjs: Pi Durable harness, SQLite, prompt, code tools, restart coordination.
-- src/extensions.mjs: automatic reload with validation before registry changes.
-- src/server.mjs and src/http.mjs: one private HTTP API with origin and body validation.
-- web/: plain JavaScript and CSS. The browser reads committed state every second and refreshes after UI edits.
+- src/agent.ts: Pi Durable harness, SQLite, prompt, code tools, restart coordination.
+- src/extensions.ts: automatic reload with validation before registry changes.
+- src/server.ts and src/http.ts: one private HTTP API with origin and body validation.
+- web/: TypeScript and CSS. The server strips browser types. The browser polls every second and refreshes after UI edits.
 - test/: code-tool, deduplication, extension, HTTP boundary, and SIGKILL recovery checks.
 
 See docs/extensions.md for the extension contract and AGENTS.md for the agent's change procedure.
+
+## TypeScript and lint
+
+Node 24 executes the server, scripts, tests, and extensions as native TypeScript. No build step or runtime loader is necessary.
+Use erasable TypeScript. Enums, parameter properties, and TSX remain unsupported.
+The browser receives JavaScript from web/app.ts through Node's experimental stripTypeScriptTypes API.
+
+Run npm run check for strict type checks, lint, and syntax checks. Run npm test for behavior and recovery tests.
+Run npm run lint for lint alone. Anti-slop source lives in tools/oxlint/anti-slop/ with its license and exact upstream revision.
+All generic anti-slop rules use error severity. Explicit boundary predicates can use typeof. Effect-specific rules remain disabled.
+ESLint runs anti-slop's compatible plugin. Oxlint runs the native accumulator rule without plugins, which avoids this VM's allocator limit.
+No host memory settings change. See tools/oxlint/anti-slop/UPSTREAM.md for provenance and configuration choices.
 
 ## Durability and limits
 
@@ -78,7 +91,7 @@ sudo journalctl -u durable-agent -n 100 --no-pager
 sudo systemctl restart durable-agent
 ```
 
-Use restart from chat after core changes. It checks syntax and tests before its result triggers process exit.
+Use restart from chat after core changes. It checks types, lint, syntax, and tests before its result triggers process exit.
 Extension entry files reload automatically. Invalid saves preserve the previous registry and show an error.
 Imported helper or dependency changes still require restart. Tests do not gate automatic extension activation.
 Browser edits trigger an automatic refresh after the next poll. Per-tab drafts survive through sessionStorage.

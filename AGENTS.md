@@ -6,9 +6,9 @@ MCP and codemode are absent initially. Add either only after the owner asks.
 
 ## Paths
 
-- src/agent.mjs opens Pi Durable, installs tools, and reads this file before each model request.
-- src/server.mjs serves chat and the HTTP API. web/ contains the browser interface.
-- extensions/*.mjs exports Pi Durable extensions. docs/extensions.md defines the contract.
+- src/agent.ts opens Pi Durable, installs tools, and reads this file before each model request.
+- src/server.ts serves chat and the HTTP API. web/app.ts contains the browser code.
+- extensions/*.ts exports Pi Durable extensions. Legacy .mjs extensions remain supported. docs/extensions.md defines the contract.
 - ~/.local/state/durable-agent/session.sqlite stores the conversation. Never delete or replace that directory.
 - deploy/ contains the systemd service and nginx configuration.
 
@@ -24,7 +24,7 @@ Extension entry files reload automatically after saves. Code tools publish valid
 A failed reload preserves the current registry. The next prompt and UI show the error. Correct the file to retry.
 Automatic reload validates modules, not tests. Valid edits activate before the test suite completes.
 UI edits refresh the browser automatically. Drafts survive that refresh.
-restart checks syntax and tests. It exits only after its tool result commits.
+restart checks types, lint, syntax, and tests. It exits only after its tool result commits.
 Systemd restarts the process. Pi Durable resumes the pending conversation.
 Imported helper modules need a process restart after edits.
 
@@ -46,3 +46,5 @@ The SQLite database uses FULL synchronization. No off-VM backup exists.
 Pi Durable, Pi AI, and Chord use exact versions in package.json and package-lock.json.
 Use their installed exports and declarations as the API reference. Do not assume another Pi version matches.
 Pin new dependencies. Avoid new dependencies when Node or the current packages provide the feature.
+Node 24 executes erasable TypeScript directly. Keep .ts import extensions. Do not add a build step or runtime loader.
+Anti-slop source lives in tools/oxlint/anti-slop/. Preserve its licenses and provenance. npm run check enforces every generic rule.
