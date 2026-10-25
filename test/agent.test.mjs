@@ -8,14 +8,26 @@ import { fauxProvider, fauxAssistantMessage, fauxToolCall } from '@earendil-work
 import { openAgent, context } from '../src/agent.mjs';
 import { gatewayModels } from '../src/models.mjs';
 
-test('gateway uses the VM integration, not an external provider URL', async () => {
-  const models = gatewayModels();
+test('gateway lists only known enabled chat models and uses VM authentication', async t => {
+  t.mock.method(globalThis, 'fetch', async url => {
+    assert.equal(url, 'https://llm.int.exe.xyz/v1/models');
+    return { ok: true, json: async () => ({ data: [{ id: 'gpt-5.5' }, { id: 'gpt-4.1' }, { id: 'unknown' }, { id: 'text-embedding-3-large' }] }) };
+  });
+  const models = await gatewayModels();
+  assert.deepEqual(models.getModels().map(model => model.id), ['gpt-4.1', 'gpt-5.5']);
   const model = models.getModel('exe', 'gpt-5.5');
   assert.equal(model.baseUrl, 'https://llm.int.exe.xyz/v1');
   assert.equal((await models.getAuth(model)).auth.apiKey, 'implicit');
 });
 
-test('restart callback observes its committed tool result', { timeout: 15000 }, async t => {
+test('catalog failures preserve the default model without extra credentials', async t => {
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('Offline'); });
+  t.mock.method(console, 'error', () => {});
+  const models = await gatewayModels();
+  assert.deepEqual(models.getModels().map(model => model.id), ['gpt-5.5']);
+});
+
+for (const separate of [false, true]) test('restart callback observes its committed tool result in ' + (separate ? 'a new conversation' : 'root'), { timeout: 15000 }, async t => {
   const workspace = await mkdtemp(join(tmpdir(), 'agent-restart-'));
   t.after(() => rm(workspace, { recursive: true, force: true }));
   await writeFile(join(workspace, 'AGENTS.md'), 'Test restart.');
@@ -29,10 +41,11 @@ test('restart callback observes its committed tool result', { timeout: 15000 }, 
   ]);
   const restarted = Promise.withResolvers();
   const agent = await openAgent({ workspace, stateDir: join(workspace, 'state'), models, provider: 'faux', modelId: 'faux-1',
-    onRestart: () => restarted.resolve(agent.view.entries.flatMap(entry => entry.model ?? []).find(message => message.toolName === 'restart')),
+    onRestart: () => restarted.resolve(agent.conversation(conversation.id).view.entries.flatMap(entry => entry.model ?? []).find(message => message.toolName === 'restart')),
   });
+  const conversation = separate ? await agent.createConversation() : agent.root;
   try {
-    await agent.root.submit({ type: 'input', content: 'Restart once' }, context);
+    await conversation.submit({ type: 'input', content: 'Restart once' }, context);
     const result = await restarted.promise;
     assert.equal(result.isError, false);
     assert.match(result.content[0].text, /Checks passed/);
@@ -94,5 +107,48 @@ test('coding tools work and SQLite reopens with request deduplication', async t 
     assert.equal((await agent.root.submit(input, context)).id, submission.id);
     assert.equal(faux.state.callCount, 2);
     assert.ok(agent.view.entries.some(entry => entry.model?.some(message => message.role === 'assistant')));
+  } finally { await agent.close(); }
+});
+
+
+test('conversations isolate context and retain model settings and history across reopen', async t => {
+  const workspace = await mkdtemp(join(tmpdir(), 'agent-conversations-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  await writeFile(join(workspace, 'AGENTS.md'), 'Test conversations.');
+  const faux = fauxProvider({ tokensPerSecond: 100000, models: [{ id: 'first' }, { id: 'second', reasoning: true }] });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  const options = { workspace, stateDir: join(workspace, 'state'), models, provider: 'faux', modelId: 'first' };
+  let agent = await openAgent(options);
+  try {
+    faux.setResponses([fauxAssistantMessage('Original answer.')]);
+    const original = await agent.root.submit({ type: 'input', content: 'Original secret', requestId: 'same-id' }, context);
+    assert.equal((await original.wait(context)).status, 'done');
+    const conversation = await agent.createConversation();
+    await conversation.configure({ model: { provider: 'faux', modelId: 'second' }, thinkingLevel: 'high' }, context);
+    faux.setResponses([(request, options, _state, model) => {
+      assert.equal(model.id, 'second');
+      assert.equal(options.reasoning, 'high');
+      assert.ok(!JSON.stringify(request.messages).includes('Original secret'));
+      return fauxAssistantMessage('Separate answer.');
+    }]);
+    const input = { type: 'input', content: 'Separate question', requestId: 'same-id' };
+    const separate = await conversation.submit(input, context);
+    assert.notEqual(separate.id, original.id);
+    assert.equal((await separate.wait(context)).status, 'done');
+    assert.equal((await agent.root.agent(context)).model.modelId, 'first');
+    assert.equal(agent.listConversations().length, 2);
+    assert.equal(agent.listConversations()[0].title, 'Separate question');
+    assert.equal(agent.conversation('missing'), undefined);
+    await agent.close();
+    agent = await openAgent(options);
+    const reopened = agent.conversation(conversation.id);
+    assert.ok(reopened.view.entries.some(entry => JSON.stringify(entry.model).includes('Separate answer.')));
+    const settings = await reopened.conversation.agent(context);
+    assert.equal(settings.model.modelId, 'second');
+    assert.equal(settings.thinkingLevel, 'high');
+    assert.equal((await reopened.conversation.submit(input, context)).id, separate.id);
+    assert.equal(faux.state.callCount, 2);
+    assert.equal(agent.listConversations().length, 2);
   } finally { await agent.close(); }
 });

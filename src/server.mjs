@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { openAgent, context } from './agent.mjs';
 import { gatewayModels } from './models.mjs';
-import { authorize, readJson, submissionInput, HttpError } from './http.mjs';
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai/models';
+import { authorize, readJson, submissionInput, agentSettings, HttpError } from './http.mjs';
 import { assets, uiVersion } from './web.mjs';
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -13,8 +14,10 @@ const stateDir = process.env.AGENT_STATE_DIR ?? join(homedir(), '.local/state/du
 const port = Number(process.env.PORT ?? 8787);
 const origin = process.env.AGENT_ORIGIN ?? 'http://127.0.0.1:' + port;
 let closing = false;
+const models = await gatewayModels(process.env.LLM_BASE_URL, process.env.LLM_MODEL);
+const choices = models.getModels().map(model => ({ provider: model.provider, modelId: model.id, efforts: getSupportedThinkingLevels(model) }));
 const agent = await openAgent({ workspace, stateDir,
-  models: gatewayModels(process.env.LLM_BASE_URL, process.env.LLM_MODEL), modelId: process.env.LLM_MODEL,
+  models, modelId: process.env.LLM_MODEL,
   onRestart: () => shutdown(),
 });
 const web = join(workspace, 'web');
@@ -28,30 +31,46 @@ const server = createServer(async (request, response) => {
   try {
     authorize(request, origin);
     if (closing) throw new HttpError(503, 'Agent will resume shortly');
-    const path = new URL(request.url, origin).pathname;
+    const url = new URL(request.url, origin);
+    const path = url.pathname;
     if (request.method === 'GET' && assets.has(path)) {
       const [file, type] = assets.get(path);
       const content = await readFile(join(web, file), 'utf8');
       return send(200, path === '/' ? content.replace('__UI_VERSION__', await uiVersion(web, content)) : content, type);
     }
     if (request.method === 'GET' && path === '/api/state') {
-      const resolved = await agent.root.agent(context);
-      return send(200, { conversationId: agent.root.id, workspace, stateDir, pid: process.pid,
-        model: resolved.model, tools: resolved.tools.map(tool => ({ name: tool.name, description: tool.description })),
+      const session = agent.conversation(url.searchParams.get('conversationId') ?? undefined);
+      if (!session) throw new HttpError(404, 'Conversation not found');
+      const resolved = await session.conversation.agent(context);
+      const view = session.view;
+      return send(200, { conversationId: session.conversation.id, conversations: agent.listConversations(), workspace, stateDir, pid: process.pid,
+        model: resolved.model, effort: resolved.thinkingLevel, models: choices,
+        tools: resolved.tools.map(tool => ({ name: tool.name, description: tool.description })),
         extensions: agent.registry.snapshot().installed().map(extension => extension.name),
         extensionError: agent.extensionError, uiVersion: await uiVersion(web),
-        entries: agent.view.entries.slice(-200), hiddenEntries: Math.max(0, agent.view.entries.length - 200),
-        live: agent.view.docs['pi.live'], inbox: agent.view.docs['pi.inbox'], reports: agent.reports,
+        entries: view.entries.slice(-200), hiddenEntries: Math.max(0, view.entries.length - 200),
+        live: view.docs['pi.live'], inbox: view.docs['pi.inbox'], reports: agent.reports,
         inspection: await agent.harness.inspect(context),
       });
     }
     if (request.method === 'POST') {
       const body = await readJson(request);
-      if (path === '/api/input') {
-        const submission = await agent.root.submit(submissionInput(body), context);
-        return send(202, { id: submission.id });
+      if (path === '/api/conversations') {
+        const conversation = await agent.createConversation(agentSettings(body, choices));
+        return send(201, { conversationId: conversation.id });
       }
-      if (path === '/api/stop') { await agent.root.abort(context); return send(200, { ok: true }); }
+      if (['/api/input', '/api/stop', '/api/settings'].includes(path)) {
+        const session = agent.conversation(body?.conversationId);
+        if (!session) throw new HttpError(404, 'Conversation not found');
+        if (path === '/api/input') {
+          const submission = await session.conversation.submit(submissionInput(body), context);
+          return send(202, { id: submission.id });
+        }
+        if (path === '/api/settings') {
+          await session.conversation.configure(agentSettings(body, choices), context);
+        } else await session.conversation.abort(context);
+        return send(200, { ok: true });
+      }
     }
     throw new HttpError(404, 'Not found');
   } catch (error) {

@@ -3,7 +3,7 @@
 Open https://v36372-agent.exe.xyz with your exe.dev account.
 The application runs on v36372-agent, a private VM from ghcr.io/boldsoftware/exeuntu:latest.
 
-This prototype gives one owner a persistent chat, code tools, and editable extensions.
+This prototype gives one owner persistent conversations, code tools, and editable extensions.
 The agent works in its own repository. It can change tools, its browser interface, and its server.
 The initial tools are read, write, edit, bash, and restart. Extension and UI edits apply automatically.
 MCP and codemode remain absent for the first self-modification tests.
@@ -17,8 +17,13 @@ MCP and codemode remain absent for the first self-modification tests.
 
 ## Chat interface
 
+Use New conversation for an empty transcript. Session contains a conversation selector, runtime details, the registry, and diagnostics.
+Model and Effort controls apply per conversation. Choices include known OpenAI chat models from the configured gateway.
+Each model offers only its supported effort levels. Changes apply to the next model request, not a request already in progress.
+Conversations retain their transcripts and settings across process restarts. All conversations share the same workspace, tools, and VM permissions.
+Per-tab drafts remain separate when you switch conversations. An unacknowledged message must complete before you switch.
 The single-column chat uses square controls and collapses tool activity into work groups.
-Expand a work group for tool inputs, outputs, and errors. Session contains runtime details, the registry, and diagnostics.
+Expand a work group for tool inputs, outputs, and errors.
 Agent replies support headings, lists, bold text, inline code, code blocks, and HTTP links. Raw HTML remains plain text.
 Tables and nested Markdown remain outside this renderer's scope.
 
@@ -33,7 +38,8 @@ npm start
 ```
 
 Open http://127.0.0.1:8787. The default model is gpt-5.5 through https://llm.int.exe.xyz/v1.
-Set LLM_BASE_URL and LLM_MODEL for another compatible OpenAI model available through your integration.
+Set LLM_BASE_URL for another compatible OpenAI gateway. LLM_MODEL sets the default model for new installations.
+If gateway discovery fails, only the default model appears in the selector until the next process restart.
 Set AGENT_ORIGIN to the exact browser origin for remote use. Keep the proxy private.
 AGENT_STATE_DIR defaults to ~/.local/state/durable-agent. PORT defaults to 8787.
 

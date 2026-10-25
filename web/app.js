@@ -4,10 +4,16 @@ const uiVersion = document.querySelector('meta[name="ui-version"]').content;
 let previous = '';
 let previousMeta = '';
 let online = false;
+let conversationId;
+let currentState;
+let changing = false;
+let changingSettings = false;
+let previousConversations = '';
 let pending;
 try { pending = JSON.parse(localStorage.getItem('durable-agent.pending') ?? 'null'); } catch { pending = null; }
 if (pending) { $('prompt').value = pending.text; $('notice').textContent = 'An unacknowledged message remains. Send retries its original request ID.'; }
 try {
+  conversationId = pending?.conversationId !== undefined ? String(pending.conversationId) : sessionStorage.getItem('durable-agent.conversation') ?? undefined;
   const draft = sessionStorage.getItem('durable-agent.draft');
   if (draft !== null) { $('prompt').value = draft; sessionStorage.removeItem('durable-agent.draft'); }
 } catch { /* Leave the page usable when browser storage is disabled. */ }
@@ -93,14 +99,38 @@ function toolView(call, result, live, busy) {
   if (output !== undefined) row.append(node('h3', failed ? 'Error' : 'Output'), node('pre', output));
   return row;
 }
+function updateControls() {
+  const locked = !online || changing || changingSettings || $('send').disabled;
+  $('new-conversation').disabled = $('conversation').disabled = locked || Boolean(pending);
+  $('model').disabled = $('effort').disabled = locked;
+}
+function efforts(modelId, preferred) {
+  const levels = currentState?.models?.find(model => model.modelId === modelId)?.efforts ?? [];
+  $('effort').replaceChildren(...levels.map(level => { const option = node('option', level); option.value = level; return option; }));
+  $('effort').value = levels.includes(preferred) ? preferred : levels.includes('medium') ? 'medium' : levels[0] ?? '';
+}
 function render(state) {
+  currentState = state;
+  if (state.conversationId !== undefined) conversationId = String(state.conversationId);
+  if (pending && !pending.conversationId) pending.conversationId = conversationId;
   online = true;
+  updateControls();
+  const conversations = JSON.stringify([state.conversations, state.conversationId]);
+  if (conversations !== previousConversations) {
+    previousConversations = conversations;
+    $('conversation').replaceChildren(...(state.conversations ?? []).map(conversation => {
+      const option = node('option', (conversation.busy ? '● ' : '') + conversation.title + ' · ' + String(conversation.id));
+      option.value = String(conversation.id);
+      return option;
+    }));
+    $('conversation').value = state.conversationId === undefined ? '' : String(state.conversationId);
+  }
   const busy = Boolean(state.live?.run);
   $('status').textContent = busy ? 'Active' : 'Ready';
   $('status').dataset.state = busy ? 'active' : 'ready';
   $('stop').disabled = !busy;
   $('stop').hidden = !busy;
-  const content = JSON.stringify([state.entries, state.live, state.inbox, state.hiddenEntries]);
+  const content = JSON.stringify([state.conversationId, state.entries, state.live, state.inbox, state.hiddenEntries]);
   if (content !== previous) {
     previous = content;
     const bottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100;
@@ -179,10 +209,14 @@ function render(state) {
     }
     if (bottom) messages.scrollTop = messages.scrollHeight;
   }
-  const metadata = JSON.stringify([state.pid, state.model, state.tools, state.extensions]);
+  const metadata = JSON.stringify([state.pid, state.conversationId, state.model, state.effort, state.models, state.tools, state.extensions]);
   if (metadata !== previousMeta) {
     previousMeta = metadata;
-    $('model').textContent = state.model?.modelId ?? '';
+    if (!changingSettings) {
+      $('model').replaceChildren(...(state.models ?? []).map(model => { const option = node('option', model.modelId); option.value = model.modelId; return option; }));
+      $('model').value = state.model?.modelId ?? '';
+      efforts(state.model?.modelId, state.effort);
+    }
     $('runtime').replaceChildren();
     for (const [label, value] of Object.entries({ Model: state.model?.modelId, Process: state.pid, Workspace: state.workspace, State: state.stateDir })) $('runtime').append(node('dt', label), node('dd', value));
     $('tools').textContent = state.tools.map(tool => tool.name).join(' · ');
@@ -201,10 +235,12 @@ async function api(path, body) {
   }
   return response.json();
 }
-async function poll() {
+async function refresh() {
+  const requested = conversationId;
   try {
-    const state = await api('/api/state');
-    if (state.uiVersion && state.uiVersion !== uiVersion && !$('send').disabled) {
+    const state = await api('/api/state' + (requested ? '?conversationId=' + encodeURIComponent(requested) : ''));
+    if (requested !== conversationId) return;
+    if (state.uiVersion && state.uiVersion !== uiVersion && !$('send').disabled && !changing && !changingSettings) {
       try {
         sessionStorage.setItem('durable-agent.draft', $('prompt').value);
         location.reload();
@@ -213,28 +249,76 @@ async function poll() {
     }
     render(state);
   }
-  catch (error) { online = false; $('status').textContent = 'Offline'; $('status').dataset.state = 'offline'; }
-  setTimeout(poll, 1000);
+  catch (error) {
+    if (requested !== conversationId) return;
+    online = false;
+    $('status').textContent = 'Offline';
+    $('status').dataset.state = 'offline';
+    updateControls();
+  }
 }
+async function poll() { await refresh(); setTimeout(poll, 1000); }
+function selectConversation(id) {
+  id = String(id);
+  // Save both drafts before replacing the visible text or selected conversation.
+  const draft = sessionStorage.getItem('durable-agent.draft.' + id) ?? '';
+  sessionStorage.setItem('durable-agent.draft.' + conversationId, $('prompt').value);
+  sessionStorage.setItem('durable-agent.conversation', id);
+  conversationId = id;
+  $('prompt').value = draft;
+  online = false;
+  previous = previousMeta = '';
+  messages.replaceChildren();
+  updateControls();
+}
+$('conversation').addEventListener('change', async () => {
+  if (pending || changing || $('send').disabled) return;
+  try { selectConversation($('conversation').value); await refresh(); }
+  catch (error) { $('notice').textContent = error.message + '. Conversation unchanged. Save your draft before you retry.'; }
+});
+$('new-conversation').addEventListener('click', async () => {
+  if (pending || changing || $('send').disabled) return;
+  changing = true;
+  updateControls();
+  try {
+    const result = await api('/api/conversations', { modelId: $('model').value, effort: $('effort').value });
+    selectConversation(result.conversationId);
+    $('notice').textContent = '';
+  } catch (error) { $('notice').textContent = error.message; }
+  finally { changing = false; await refresh(); updateControls(); }
+});
+async function saveSettings() {
+  changingSettings = true;
+  updateControls();
+  try {
+    await api('/api/settings', { conversationId, modelId: $('model').value, effort: $('effort').value });
+    $('notice').textContent = 'Model and effort apply to the next model request.';
+  } catch (error) { $('notice').textContent = error.message; }
+  finally { changingSettings = false; previousMeta = ''; await refresh(); updateControls(); }
+}
+$('model').addEventListener('change', () => { efforts($('model').value, $('effort').value); return saveSettings(); });
+$('effort').addEventListener('change', saveSettings);
 $('composer').addEventListener('submit', async event => {
   event.preventDefault();
   const text = $('prompt').value.trim();
   if (!text) return;
-  if (!online) { $('notice').textContent = 'Wait for the connection. Your draft remains here.'; return; }
-  if (!pending || pending.text !== text) pending = { text, requestId: crypto.randomUUID() };
+  if (!online || changing || changingSettings) { $('notice').textContent = 'Wait for the connection or settings response. Your draft remains here.'; return; }
+  if (!pending) pending = { text, requestId: crypto.randomUUID(), conversationId };
   // Persist before POST so an uncertain response can retry without duplicate input.
   try { localStorage.setItem('durable-agent.pending', JSON.stringify(pending)); }
   catch { $('notice').textContent = 'Browser storage unavailable. Enable storage before you send.'; return; }
   $('send').disabled = true;
+  updateControls();
+  const sentText = pending.text;
   try {
     await api('/api/input', pending);
     pending = null;
     localStorage.removeItem('durable-agent.pending');
-    if ($('prompt').value.trim() === text) $('prompt').value = '';
+    if ($('prompt').value.trim() === sentText) $('prompt').value = '';
     $('notice').textContent = '';
     messages.scrollTop = messages.scrollHeight;
   } catch (error) { $('notice').textContent = error.message + '. Send retries this request.'; }
-  finally { $('send').disabled = false; }
+  finally { $('send').disabled = false; updateControls(); }
 });
 $('prompt').addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$('send').disabled) $('composer').requestSubmit(); }
@@ -244,7 +328,8 @@ $('session').addEventListener('keydown', event => {
 });
 $('stop').addEventListener('click', async () => {
   $('stop').disabled = true;
-  try { await api('/api/stop', {}); $('notice').textContent = 'Run stopped.'; }
+  const stoppedConversation = conversationId;
+  try { await api('/api/stop', { conversationId: stoppedConversation }); if (conversationId === stoppedConversation) $('notice').textContent = 'Run stopped.'; }
   catch (error) { $('notice').textContent = error.message; }
   finally { $('stop').disabled = false; }
 });

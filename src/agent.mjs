@@ -62,21 +62,50 @@ export async function openAgent({ workspace, stateDir, models, modelId = 'gpt-5.
     settings: { toolExecution: 'sequential', retry: { maxRetries: 2 }, stream: { timeoutMs: 180000 } },
     onReport: report,
   }, context);
-  const root = await harness.root(context, { agent: { model: { provider, modelId }, cwd: workspace, thinkingLevel: 'medium' } });
-  const watch = await root.watch(context);
-  let view = watch.value;
-  watch.start(value => {
-    view = value;
-    if (restartCall && value.entries.some(entry => entry.model?.some(message => message.role === 'toolResult' && message.toolCallId === restartCall))) {
-      restartCall = undefined;
-      // Do not await close inside a watch callback: close waits for watch delivery.
-      setImmediate(onRestart);
-    }
-  });
+  const defaults = { model: { provider, modelId }, cwd: workspace, thinkingLevel: 'medium' };
+  const root = await harness.root(context, { agent: defaults });
+  const conversations = new Map();
+  async function track(conversation) {
+    const watch = await conversation.watch(context);
+    const session = { conversation, view: watch.value, watch };
+    conversations.set(conversation.id, session);
+    watch.start(value => {
+      session.view = value;
+      if (restartCall && value.entries.some(entry => entry.model?.some(message => message.role === 'toolResult' && message.toolCallId === restartCall))) {
+        restartCall = undefined;
+        // Do not await close inside a watch callback: close waits for watch delivery.
+        setImmediate(onRestart);
+      }
+    });
+    return conversation;
+  }
+  let cursor;
+  do {
+    const page = await harness.commit(tx => tx.scanConversations({}, 100, cursor), context);
+    for (const record of page.items) if (!record.owner) await track(await harness.conversation(record.id, context));
+    cursor = page.next;
+  } while (cursor);
   return {
     harness, root, registry, reports,
     get extensionError() { return extensionError; },
-    get view() { return view; },
-    async close() { await extensions.close(); await harness.close(context); await watch.stop(); },
+    get view() { return conversations.get(root.id).view; },
+    conversation(id = root.id) {
+      return conversations.get(typeof id === 'string' && /^[1-9]\d*$/.test(id) ? Number(id) : id);
+    },
+    listConversations() {
+      return [...conversations.values()].reverse().map(({ conversation, view }) => {
+        const first = view.entries.flatMap(entry => entry.model ?? []).find(message => message.role === 'user');
+        const text = typeof first?.content === 'string' ? first.content : first?.content?.find(block => block.type === 'text')?.text;
+        return { id: conversation.id, title: text?.slice(0, 80) || 'New conversation', busy: Boolean(view.docs['pi.live']?.run) };
+      });
+    },
+    async createConversation(settings = {}) {
+      return track(await harness.createConversation({ ownership: { kind: 'ownerless' }, agent: { ...defaults, ...settings } }, context));
+    },
+    async close() {
+      await extensions.close();
+      await harness.close(context);
+      await Promise.all([...conversations.values()].map(session => session.watch.stop()));
+    },
   };
 }

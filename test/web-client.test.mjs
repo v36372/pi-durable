@@ -169,3 +169,116 @@ test('UI refresh stops rather than losing a draft when sessionStorage fails', as
   assert.equal(page.get('prompt').value, 'keep this');
   assert.match(page.get('notice').textContent, /Save your draft/);
 });
+
+test('new conversations and conversation switches preserve separate drafts', async () => {
+  const page = client();
+  const conversations = [{ id: 'root', title: 'Original' }, { id: 'second', title: 'New conversation' }];
+  const models = [{ provider: 'exe', modelId: 'gpt-5.5', efforts: ['low', 'medium', 'high'] }];
+  const state = id => ({ ...page.state, conversationId: id, conversations, models, model: { modelId: 'gpt-5.5' }, effort: 'medium' });
+  page.context.fetch = async (path, options) => {
+    page.calls.push({ path, options });
+    return { ok: true, json: async () => path === '/api/conversations' ? { conversationId: 'second' }
+      : state(path.includes('second') ? 'second' : 'root') };
+  };
+  await page.context.poll();
+  page.get('prompt').value = 'original draft';
+  await page.get('new-conversation').listeners.click();
+  assert.equal(page.sessionStorage.getItem('durable-agent.conversation'), 'second');
+  assert.equal(page.get('prompt').value, '');
+  const creation = page.calls.find(call => call.path === '/api/conversations');
+  assert.deepEqual(JSON.parse(creation.options.body), { modelId: 'gpt-5.5', effort: 'medium' });
+  page.get('prompt').value = 'separate draft';
+  page.get('conversation').value = 'root';
+  await page.get('conversation').listeners.change();
+  assert.equal(page.get('prompt').value, 'original draft');
+  page.get('conversation').value = 'second';
+  await page.get('conversation').listeners.change();
+  assert.equal(page.get('prompt').value, 'separate draft');
+  const reopened = client({ sessionStorage: page.sessionStorage });
+  await reopened.context.poll();
+  assert.ok(reopened.calls.some(call => call.path === '/api/state?conversationId=second'));
+});
+
+test('numeric conversation IDs survive browser storage, selector values, and polling', async () => {
+  const sessionStorage = storage();
+  sessionStorage.setItem('durable-agent.conversation', '2');
+  const page = client({ sessionStorage });
+  Object.assign(page.state, { conversationId: 2, conversations: [{ id: 1, title: 'Original' }, { id: 2, title: 'Separate' }] });
+  await page.context.poll();
+  await page.context.poll();
+  assert.equal(page.get('conversation').value, '2');
+  assert.equal(page.get('conversation').children[1].value, '2');
+  assert.match(page.get('conversation').textContent, /Separate · 2/);
+  page.get('prompt').value = 'message';
+  await page.get('composer').listeners.submit({ preventDefault() {} });
+  const send = page.calls.find(call => call.path === '/api/input');
+  assert.equal(JSON.parse(send.options.body).conversationId, '2');
+  assert.ok(page.calls.filter(call => call.path.startsWith('/api/state')).every(call => call.path.endsWith('conversationId=2')));
+});
+
+test('model changes select a supported effort and target the current conversation', async () => {
+  const page = client();
+  Object.assign(page.state, { conversationId: 'second', effort: 'high', model: { modelId: 'gpt-5.5' }, models: [
+    { modelId: 'gpt-5.5', efforts: ['medium', 'high'] }, { modelId: 'gpt-4.1', efforts: ['off'] },
+  ] });
+  const fetch = page.context.fetch;
+  page.context.fetch = async (path, options) => {
+    if (path === '/api/settings') {
+      const body = JSON.parse(options.body);
+      page.state.model.modelId = body.modelId;
+      page.state.effort = body.effort;
+    }
+    return fetch(path, options);
+  };
+  await page.context.poll();
+  assert.equal(page.get('effort').value, 'high');
+  page.get('model').value = 'gpt-4.1';
+  await page.get('model').listeners.change();
+  assert.equal(page.get('effort').value, 'off');
+  assert.equal(page.get('effort').children.length, 1);
+  const settings = page.calls.find(call => call.path === '/api/settings');
+  assert.deepEqual(JSON.parse(settings.options.body), { conversationId: 'second', modelId: 'gpt-4.1', effort: 'off' });
+  await page.get('stop').listeners.click();
+  assert.equal(JSON.parse(page.calls.find(call => call.path === '/api/stop').options.body).conversationId, 'second');
+});
+
+test('uncertain sends retain their conversation and request ID, even after edits', async () => {
+  const page = client();
+  page.state.conversationId = 'second';
+  await page.context.poll();
+  const fetch = page.context.fetch;
+  page.context.fetch = async (path, options) => {
+    if (path === '/api/input') { page.calls.push({ path, options }); throw new Error('Connection lost'); }
+    return fetch(path, options);
+  };
+  page.get('prompt').value = 'original message';
+  await page.get('composer').listeners.submit({ preventDefault() {} });
+  const pending = JSON.parse(page.localStorage.getItem('durable-agent.pending'));
+  assert.equal(pending.conversationId, 'second');
+  assert.equal(page.get('new-conversation').disabled, true);
+  assert.equal(page.get('conversation').disabled, true);
+  page.get('prompt').value = 'next draft';
+  await page.get('composer').listeners.submit({ preventDefault() {} });
+  const sends = page.calls.filter(call => call.path === '/api/input').map(call => JSON.parse(call.options.body));
+  assert.deepEqual(sends, [pending, pending]);
+  const reopened = client({ localStorage: page.localStorage });
+  await reopened.context.poll();
+  assert.equal(reopened.calls[0].path, '/api/state?conversationId=second');
+});
+
+test('a stale poll cannot replace another conversation after a switch', async () => {
+  const page = client();
+  page.state.conversationId = 'root';
+  await page.context.poll();
+  const reply = Promise.withResolvers();
+  const fetch = page.context.fetch;
+  page.context.fetch = path => path === '/api/state?conversationId=root' ? reply.promise : fetch(path);
+  const stale = page.context.poll();
+  page.state.conversationId = 'second';
+  page.get('conversation').value = 'second';
+  await page.get('conversation').listeners.change();
+  reply.resolve({ ok: true, json: async () => ({ ...page.state, conversationId: 'root', entries: [{ model: [{ role: 'user', content: 'Wrong transcript' }] }] }) });
+  await stale;
+  assert.equal(page.get('conversation').value, 'second');
+  assert.ok(!page.get('messages').textContent.includes('Wrong transcript'));
+});

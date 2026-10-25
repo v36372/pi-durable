@@ -27,6 +27,12 @@ export async function readJson(request) {
   catch { throw new HttpError(400, 'Invalid JSON'); }
 }
 
+export function agentSettings(body, choices) {
+  const model = choices.find(model => model.modelId === body?.modelId);
+  if (!model || !model.efforts.includes(body?.effort)) throw new HttpError(400, 'Choose an available model and effort');
+  return { model: { provider: model.provider, modelId: model.modelId }, thinkingLevel: body.effort };
+}
+
 export function submissionInput(body) {
   if (!body || typeof body.text !== 'string' || !body.text.trim() || body.text.length > 32000 ||
       typeof body.requestId !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(body.requestId)) throw new HttpError(400, 'Provide text and a request ID');

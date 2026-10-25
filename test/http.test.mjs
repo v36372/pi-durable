@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import { authorize, readJson, submissionInput } from '../src/http.mjs';
+import { authorize, readJson, submissionInput, agentSettings } from '../src/http.mjs';
 const origin = 'https://agent.exe.xyz';
 const request = (headers = {}, method = 'POST') => ({ method, headers: { host: 'agent.exe.xyz', origin, 'content-type': 'application/json', ...headers } });
 test('HTTP rejects cross-origin writes, host spoofing, and non-JSON input', () => {
@@ -20,6 +20,15 @@ test('cross-site top-level page navigation works without exposing API routes', (
   }
   for (const headers of [{ origin: 'https://evil.test' }, { host: 'evil.test' }, { 'sec-fetch-mode': 'cors' }, { 'sec-fetch-dest': 'iframe' }]) {
     assert.throws(() => authorize({ ...navigation, headers: { ...navigation.headers, ...headers } }, origin));
+  }
+});
+test('model settings reject unknown models and unsupported effort levels', () => {
+  const choices = [{ provider: 'exe', modelId: 'gpt-4.1', efforts: ['off'] }];
+  assert.deepEqual(agentSettings({ modelId: 'gpt-4.1', effort: 'off' }, choices), {
+    model: { provider: 'exe', modelId: 'gpt-4.1' }, thinkingLevel: 'off',
+  });
+  for (const body of [null, {}, { modelId: 'unknown', effort: 'off' }, { modelId: 'gpt-4.1', effort: 'high' }]) {
+    assert.throws(() => agentSettings(body, choices), error => error.status === 400);
   }
 });
 test('body and submission validation enforce limits', async () => {
