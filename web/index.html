@@ -4,8 +4,9 @@
 <body>
 <header class="topbar">
 <div class="brand"><span class="brand-mark" aria-hidden="true">D/</span><h1>Durable Agent</h1></div>
-<div class="session-controls"><span id="status" role="status">Connect…</span>
+<div class="session-controls"><button id="new-conversation" type="button" disabled>New conversation</button><span id="status" role="status">Connect…</span>
 <details id="session"><summary>Session</summary><div class="session-info">
+<label for="conversation">Conversation</label><select id="conversation" disabled></select>
 <h2>Current session</h2><dl id="runtime"></dl>
 <h2>Tools <span id="tool-count"></span></h2><div id="tools"></div>
 <h2>Extensions</h2><div id="extensions"></div>
@@ -23,7 +24,7 @@
 <textarea id="prompt" rows="2" maxlength="32000" placeholder="Ask a question. Make a change." required></textarea>
 <div class="actions"><small><kbd>Enter</kbd> send <span>· Shift + Enter for a new line</span></small><button id="stop" type="button" hidden>Stop</button><button id="send" type="submit">Send <span aria-hidden="true">↑</span></button></div>
 </form>
-<div class="composer-footer"><span id="model"></span><span>Private workspace</span></div>
+<div class="composer-footer"><div class="model-controls"><label for="model">Model</label><select id="model" disabled></select><label for="effort">Effort</label><select id="effort" disabled></select></div><span>Private workspace</span></div>
 </div>
 </main>
 </body></html>

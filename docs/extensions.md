@@ -1,12 +1,12 @@
 # Tool extensions
 
-Create extensions/<name>.mjs. Export one Pi Durable extension as default.
+Create extensions/<name>.ts. Export one Pi Durable extension as default. Legacy .mjs entry files still load.
 The host loads these modules at startup and reloads them automatically after file changes.
-All conversations select installed extensions by default. This prototype has one root conversation.
+All conversations select installed extensions by default. New conversations share the workspace and extension registry, not their transcripts.
 
 defineTool validates arguments against its TypeBox schema. Tools can return text, structured results, and UI details.
 
-```js
+```ts
 import { Type } from '@earendil-works/pi-ai';
 import { defineExtension, defineTool } from '@earendil-works/pi-durable';
 
@@ -37,6 +37,8 @@ After a process restart, invalid extensions leave only the core tools active.
 Remove an entry file to remove its extension automatically. Calls already in progress retain their prior implementation.
 
 Entry modules reload by content hash. If an imported helper or dependency changes, call restart.
+Node 24 strips TypeScript types directly. Use erasable syntax and explicit .ts extensions for local imports.
+Keep extension entries compatible with strict type checks and the generic anti-slop rules in npm run check.
 Modules run as trusted Node code. A module's top-level effects cannot roll back after an import failure.
 Avoid top-level servers, timers, and processes. If persistent resources need disposal, extend the loader before you add them.
 Do not assume extension reload offers process isolation or a security sandbox.
