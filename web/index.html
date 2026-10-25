@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Durable Agent</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<body>
+<header><div><h1>Durable Agent</h1><p>One workspace. A conversation that survives restarts.</p></div><span id="status" role="status">Connect…</span></header>
+<main>
+<section class="chat" aria-label="Conversation">
+<div id="messages" role="log" aria-live="polite" aria-relevant="additions text"></div>
+<p id="notice" role="status"></p>
+<form id="composer"><label for="prompt">Ask the agent to inspect or change itself</label><textarea id="prompt" rows="3" maxlength="32000" placeholder="Read AGENTS.md and describe how your extensions work." required></textarea><div class="actions"><small>Enter sends · Shift+Enter adds a line</small><button id="stop" type="button">Stop</button><button id="send" type="submit">Send</button></div></form>
+</section>
+<aside>
+<h2>Runtime</h2><dl id="runtime"></dl>
+<h2>Tool registry <span id="tool-count"></span></h2><div id="tools"></div>
+<h2>Extensions</h2><div id="extensions"></div><button id="reload" type="button">Reload extensions</button>
+<p class="hint">Edit extensions/*.mjs, then reload. Core edits need restart_agent. UI files take effect on refresh.</p>
+<details><summary>Diagnostics</summary><pre id="diagnostics"></pre></details>
+<p class="warning">Private VM · tools execute real commands. Extensions run trusted code. No protection against disk loss.</p>
+</aside>
+</main>
+</body></html>
