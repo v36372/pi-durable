@@ -9,6 +9,19 @@ test('HTTP rejects cross-origin writes, host spoofing, and non-JSON input', () =
   for (const headers of [{ origin: 'https://evil.test' }, { origin: undefined }, { host: 'evil.test' }, { 'content-type': 'text/plain' }, { 'sec-fetch-site': 'cross-site' }]) assert.throws(() => authorize(request(headers), origin));
   assert.throws(() => authorize(request({ origin: 'https://evil.test' }, 'GET'), origin));
 });
+test('cross-site top-level page navigation works without exposing API routes', () => {
+  const navigation = { method: 'GET', url: '/', headers: {
+    host: 'agent.exe.xyz', 'sec-fetch-site': 'cross-site', 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document',
+  } };
+  assert.doesNotThrow(() => authorize(navigation, origin));
+  assert.doesNotThrow(() => authorize({ ...navigation, url: '/?from=login' }, origin));
+  for (const change of [{ method: 'POST' }, { url: '/api/state' }, { url: '/app.js' }]) {
+    assert.throws(() => authorize({ ...navigation, ...change }, origin));
+  }
+  for (const headers of [{ origin: 'https://evil.test' }, { host: 'evil.test' }, { 'sec-fetch-mode': 'cors' }, { 'sec-fetch-dest': 'iframe' }]) {
+    assert.throws(() => authorize({ ...navigation, headers: { ...navigation.headers, ...headers } }, origin));
+  }
+});
 test('body and submission validation enforce limits', async () => {
   assert.deepEqual(await readJson(Readable.from([Buffer.from('{"ok":true}')])), { ok: true });
   await assert.rejects(readJson(Readable.from([Buffer.alloc(65537)])), /64 KiB/);
