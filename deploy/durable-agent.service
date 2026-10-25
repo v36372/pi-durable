@@ -1,0 +1,29 @@
+[Unit]
+Description=Durable Agent
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=exedev
+WorkingDirectory=/home/exedev/codes/durable-agent
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=AGENT_ORIGIN=https://v36372-agent.exe.xyz
+Environment=AGENT_STATE_DIR=/home/exedev/.local/state/durable-agent
+Environment=PORT=8787
+Environment=LLM_BASE_URL=https://llm.int.exe.xyz/v1
+Environment=LLM_MODEL=gpt-5.5
+ExecStart=/bin/bash /home/exedev/codes/durable-agent/scripts/start.sh
+Restart=always
+RestartSec=2
+TimeoutStopSec=20
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
