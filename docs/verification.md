@@ -40,6 +40,18 @@ The reload button is absent. POST /api/reload returns 404. The registry contains
 No page errors or horizontal overflow appeared at desktop or mobile widths.
 The browser test used the authorized VM command tunnel, including cross-site document request headers.
 
+## Chat redesign
+
+All 19 tests pass on both hosts after the single-column redesign.
+Client tests cover paired tool results, collapsed work groups, visible failures, focus retention, and safe Markdown output.
+A version mismatch triggers refresh before the new renderer touches old markup.
+
+Chromium checked square controls, session details, and collapsed work groups against the live VM.
+Desktop, 390-pixel, and 320-pixel layouts showed no page errors or horizontal overflow. The composer remained visible.
+An open browser retained its draft through deployment. The conversation and process IDs stayed unchanged.
+Fixture-based browser checks covered send, stop, active tools, extension errors, and the empty state without new live messages.
+The checks used the authorized VM command tunnel, not an owner browser session.
+
 ## Not tested
 
 No VM reboot, disk-loss recovery, off-VM backup, or celld deployment test ran.
