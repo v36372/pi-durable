@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Durable Agent</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="ui-version" content="__UI_VERSION__"><title>Durable Agent</title><link rel="stylesheet" href="/style.css"><script type="module" src="/app.js"></script></head>
 <body>
 <header><div><h1>Durable Agent</h1><p>One workspace. A conversation that survives restarts.</p></div><span id="status" role="status">Connect…</span></header>
 <main>
@@ -12,8 +12,8 @@
 <aside>
 <h2>Runtime</h2><dl id="runtime"></dl>
 <h2>Tool registry <span id="tool-count"></span></h2><div id="tools"></div>
-<h2>Extensions</h2><div id="extensions"></div><button id="reload" type="button">Reload extensions</button>
-<p class="hint">Edit extensions/*.mjs, then reload. Core edits need restart_agent. UI files take effect on refresh.</p>
+<h2>Extensions</h2><div id="extensions"></div><p id="extension-status" class="hint" role="status">Changes reload automatically.</p>
+<p class="hint">Save extension or UI edits to apply them. Core edits need restart. Drafts survive automatic UI refresh.</p>
 <details><summary>Diagnostics</summary><pre id="diagnostics"></pre></details>
 <p class="warning">Private VM · tools execute real commands. Extensions run trusted code. No protection against disk loss.</p>
 </aside>

@@ -2,9 +2,9 @@
 
 Verified on October 25, 2026.
 
-## Automated checks
+## Initial prototype checks
 
-`npm run check` and all eight `npm test` checks pass on the development host and agent VM.
+At initial deployment, `npm run check` and all eight `npm test` checks passed on both hosts.
 The tests cover input validation, extension replacement, failed batch preservation, code tools, request deduplication, and restart coordination.
 Two tests send SIGKILL during a tool call. Settled effects occur once. Safe tools resume. Unsafe tools return an interruption error.
 
@@ -26,6 +26,19 @@ The browser test used an authorized VM command tunnel for the real assets and AP
 A separate anonymous HTTPS request received the exe.dev login redirect. The VM share configuration reports private.
 Cross-origin mutations and forged Host headers returned 403. A second startup failed the process lock.
 Both systemd services report active and enabled.
+
+## Automatic reload update
+
+All 15 tests pass on both hosts after the automatic reload change.
+Tests cover file saves, atomic replacements, failed reload recovery, deletion, watcher shutdown, and next-request tool availability.
+Client tests cover draft retention, request ID retention, delayed refresh during submission, and browser storage failures.
+
+Chromium confirmed automatic extension creation, error display, recovery, and removal against the live VM.
+The agent invoked the new tool without a reload command. The test then removed its temporary extension.
+A CSS edit triggered a browser refresh and preserved the unsent draft. The process and conversation IDs did not change.
+The reload button is absent. POST /api/reload returns 404. The registry contains read, write, edit, bash, and restart.
+No page errors or horizontal overflow appeared at desktop or mobile widths.
+The browser test used the authorized VM command tunnel, including cross-site document request headers.
 
 ## Not tested
 

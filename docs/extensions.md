@@ -1,7 +1,7 @@
 # Tool extensions
 
 Create extensions/<name>.mjs. Export one Pi Durable extension as default.
-The host loads these modules at startup and through reload_extensions or the UI button.
+The host loads these modules at startup and reloads them automatically after file changes.
 All conversations select installed extensions by default. This prototype has one root conversation.
 
 defineTool validates arguments against its TypeBox schema. Tools can return text, structured results, and UI details.
@@ -26,16 +26,17 @@ The example is documentation only. The initial registry contains no sample tool.
 
 ## Activation
 
-1. Add a focused test and run npm run check plus npm test.
-2. Call reload_extensions or press Reload extensions.
+1. Save the extension. Code tools publish valid edits before the next model request. External saves reload after a 150 ms debounce.
+2. Add a focused test and run npm run check plus npm test. Tests do not gate automatic activation.
 3. Confirm the name in the registry. Invoke the new tool through chat.
 
 The loader validates the whole batch before it changes the registry.
 Duplicate extension names and duplicate tool names fail. Core tools cannot receive extension overrides.
-A failed reload leaves prior tools active. After a process restart, invalid extensions leave only the core tools active.
-Remove a file and reload to remove its extension. Calls already in progress retain their prior implementation.
+A failed reload leaves prior tools active. The UI and next model prompt show the error. A valid save clears it.
+After a process restart, invalid extensions leave only the core tools active.
+Remove an entry file to remove its extension automatically. Calls already in progress retain their prior implementation.
 
-Entry modules reload by content hash. If an imported helper changes, call restart_agent.
+Entry modules reload by content hash. If an imported helper or dependency changes, call restart.
 Modules run as trusted Node code. A module's top-level effects cannot roll back after an import failure.
 Avoid top-level servers, timers, and processes. If persistent resources need disposal, extend the loader before you add them.
 Do not assume extension reload offers process isolation or a security sandbox.

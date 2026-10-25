@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { openAgent, context } from './agent.mjs';
 import { gatewayModels } from './models.mjs';
 import { authorize, readJson, submissionInput, HttpError } from './http.mjs';
+import { assets, uiVersion } from './web.mjs';
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const stateDir = process.env.AGENT_STATE_DIR ?? join(homedir(), '.local/state/durable-agent');
@@ -16,7 +17,7 @@ const agent = await openAgent({ workspace, stateDir,
   models: gatewayModels(process.env.LLM_BASE_URL, process.env.LLM_MODEL), modelId: process.env.LLM_MODEL,
   onRestart: () => shutdown(),
 });
-const assets = new Map([['/', ['index.html', 'text/html']], ['/app.js', ['app.js', 'text/javascript']], ['/style.css', ['style.css', 'text/css']]]);
+const web = join(workspace, 'web');
 const server = createServer(async (request, response) => {
   const send = (status, body, type = 'application/json') => {
     response.writeHead(status, { 'Content-Type': type + '; charset=utf-8', 'Cache-Control': 'no-store',
@@ -30,13 +31,15 @@ const server = createServer(async (request, response) => {
     const path = new URL(request.url, origin).pathname;
     if (request.method === 'GET' && assets.has(path)) {
       const [file, type] = assets.get(path);
-      return send(200, await readFile(join(workspace, 'web', file)), type);
+      const content = await readFile(join(web, file), 'utf8');
+      return send(200, path === '/' ? content.replace('__UI_VERSION__', await uiVersion(web, content)) : content, type);
     }
     if (request.method === 'GET' && path === '/api/state') {
       const resolved = await agent.root.agent(context);
       return send(200, { conversationId: agent.root.id, workspace, stateDir, pid: process.pid,
         model: resolved.model, tools: resolved.tools.map(tool => ({ name: tool.name, description: tool.description })),
         extensions: agent.registry.snapshot().installed().map(extension => extension.name),
+        extensionError: agent.extensionError, uiVersion: await uiVersion(web),
         entries: agent.view.entries.slice(-200), hiddenEntries: Math.max(0, agent.view.entries.length - 200),
         live: agent.view.docs['pi.live'], inbox: agent.view.docs['pi.inbox'], reports: agent.reports,
         inspection: await agent.harness.inspect(context),
@@ -49,7 +52,6 @@ const server = createServer(async (request, response) => {
         return send(202, { id: submission.id });
       }
       if (path === '/api/stop') { await agent.root.abort(context); return send(200, { ok: true }); }
-      if (path === '/api/reload') return send(200, { extensions: await agent.reload() });
     }
     throw new HttpError(404, 'Not found');
   } catch (error) {

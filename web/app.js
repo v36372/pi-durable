@@ -1,11 +1,16 @@
 const $ = id => document.getElementById(id);
 const messages = $('messages');
+const uiVersion = document.querySelector('meta[name="ui-version"]').content;
 let previous = '';
 let previousMeta = '';
 let online = false;
 let pending;
 try { pending = JSON.parse(localStorage.getItem('durable-agent.pending') ?? 'null'); } catch { pending = null; }
 if (pending) { $('prompt').value = pending.text; $('notice').textContent = 'An unacknowledged message remains. Send retries its original request ID.'; }
+try {
+  const draft = sessionStorage.getItem('durable-agent.draft');
+  if (draft !== null) { $('prompt').value = draft; sessionStorage.removeItem('durable-agent.draft'); }
+} catch { /* Leave the page usable when browser storage is disabled. */ }
 
 function node(tag, text, className) {
   const element = document.createElement(tag);
@@ -47,7 +52,7 @@ function render(state) {
     const bottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100;
     const expanded = new Set([...messages.querySelectorAll('details[open]')].map(item => item.dataset.key));
     const fragment = document.createDocumentFragment();
-    if (!state.entries.some(entry => entry.model?.some(message => message.role === 'user'))) fragment.append(node('p', 'Start with a small change. The agent can read its source, add a tool, and reload its extensions.', 'empty'));
+    if (!state.entries.some(entry => entry.model?.some(message => message.role === 'user'))) fragment.append(node('p', 'Start with a small change. The agent can edit its source and add tools. Extensions reload automatically.', 'empty'));
     if (state.hiddenEntries) fragment.append(node('p', state.hiddenEntries + ' earlier active entries omitted from this view. SQLite retains the transcript.', 'hint'));
     for (const entry of state.entries) {
       for (const [index, message] of (entry.model ?? []).entries()) {
@@ -77,6 +82,8 @@ function render(state) {
     $('tool-count').textContent = state.tools.length;
     $('extensions').replaceChildren(...state.extensions.map(name => node('div', name)));
   }
+  $('extension-status').textContent = state.extensionError ?? 'Changes reload automatically.';
+  $('extension-status').className = state.extensionError ? 'error' : 'hint';
   $('diagnostics').textContent = JSON.stringify({ reports: state.reports, inspection: state.inspection, inbox: state.inbox }, null, 2);
 }
 async function api(path, body) {
@@ -89,7 +96,17 @@ async function api(path, body) {
   return response.json();
 }
 async function poll() {
-  try { render(await api('/api/state')); }
+  try {
+    const state = await api('/api/state');
+    render(state);
+    if (state.uiVersion && state.uiVersion !== uiVersion && !$('send').disabled) {
+      try {
+        sessionStorage.setItem('durable-agent.draft', $('prompt').value);
+        location.reload();
+        return;
+      } catch { $('notice').textContent = 'UI changed. Browser storage is unavailable. Save your draft before you refresh.'; }
+    }
+  }
   catch (error) { online = false; $('status').textContent = 'Disconnected · retry in 1 second'; }
   setTimeout(poll, 1000);
 }
@@ -107,7 +124,7 @@ $('composer').addEventListener('submit', async event => {
     await api('/api/input', pending);
     pending = null;
     localStorage.removeItem('durable-agent.pending');
-    $('prompt').value = '';
+    if ($('prompt').value.trim() === text) $('prompt').value = '';
     $('notice').textContent = 'Message saved.';
     messages.scrollTop = messages.scrollHeight;
   } catch (error) { $('notice').textContent = error.message + '. Send retries this request.'; }
@@ -116,12 +133,10 @@ $('composer').addEventListener('submit', async event => {
 $('prompt').addEventListener('keydown', event => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$('send').disabled) $('composer').requestSubmit(); }
 });
-for (const [id, path, done] of [['stop', '/api/stop', 'Run stopped.'], ['reload', '/api/reload', 'Extensions reloaded.']]) {
-  $(id).addEventListener('click', async () => {
-    $(id).disabled = true;
-    try { await api(path, {}); $('notice').textContent = done; }
-    catch (error) { $('notice').textContent = error.message; }
-    finally { $(id).disabled = false; }
-  });
-}
+$('stop').addEventListener('click', async () => {
+  $('stop').disabled = true;
+  try { await api('/api/stop', {}); $('notice').textContent = 'Run stopped.'; }
+  catch (error) { $('notice').textContent = error.message; }
+  finally { $('stop').disabled = false; }
+});
 poll();

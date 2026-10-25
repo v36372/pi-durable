@@ -24,18 +24,46 @@ test('restart callback observes its committed tool result', { timeout: 15000 }, 
   const models = createModels();
   models.setProvider(faux.provider);
   faux.setResponses([
-    fauxAssistantMessage(fauxToolCall('restart_agent', {}), { stopReason: 'toolUse' }),
+    fauxAssistantMessage(fauxToolCall('restart', {}), { stopReason: 'toolUse' }),
     fauxAssistantMessage('After restart.'),
   ]);
   const restarted = Promise.withResolvers();
   const agent = await openAgent({ workspace, stateDir: join(workspace, 'state'), models, provider: 'faux', modelId: 'faux-1',
-    onRestart: () => restarted.resolve(agent.view.entries.flatMap(entry => entry.model ?? []).find(message => message.toolName === 'restart_agent')),
+    onRestart: () => restarted.resolve(agent.view.entries.flatMap(entry => entry.model ?? []).find(message => message.toolName === 'restart')),
   });
   try {
     await agent.root.submit({ type: 'input', content: 'Restart once' }, context);
     const result = await restarted.promise;
     assert.equal(result.isError, false);
     assert.match(result.content[0].text, /Checks passed/);
+  } finally { await agent.close(); }
+});
+
+test('an extension written by a tool is available to the very next model request', async t => {
+  const workspace = await mkdtemp(join(tmpdir(), 'agent-auto-extension-'));
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  await writeFile(join(workspace, 'AGENTS.md'), 'Test automatic reload.');
+  const faux = fauxProvider({ tokensPerSecond: 100000 });
+  const models = createModels();
+  models.setProvider(faux.provider);
+  faux.setResponses([
+    fauxAssistantMessage(fauxToolCall('write', { path: 'extensions/probe.mjs', content:
+      "export default {name:'probe',tools:[{name:'probe',description:'Probe',parameters:{type:'object',properties:{}},execute:async()=>({output:[{type:'text',text:'automatic'}]})}]}"
+    }), { stopReason: 'toolUse' }),
+    request => {
+      assert.ok(request.messages.some(message => message.toolsAdded?.some(tool => tool.name === 'probe')));
+      return fauxAssistantMessage(fauxToolCall('probe', {}), { stopReason: 'toolUse' });
+    },
+    fauxAssistantMessage('Done.'),
+  ]);
+  const agent = await openAgent({ workspace, stateDir: join(workspace, 'state'), models, provider: 'faux', modelId: 'faux-1' });
+  try {
+    const submission = await agent.root.submit({ type: 'input', content: 'Add and use a tool' }, context);
+    const settled = await submission.wait(context);
+    assert.equal(settled.status, 'done', JSON.stringify(settled));
+    const result = agent.view.entries.flatMap(entry => entry.model ?? []).find(message => message.toolName === 'probe');
+    assert.equal(result.isError, false);
+    assert.equal(result.content[0].text, 'automatic');
   } finally { await agent.close(); }
 });
 
@@ -59,7 +87,7 @@ test('coding tools work and SQLite reopens with request deduplication', async t 
     assert.equal(await readFile(join(workspace, 'proof.txt'), 'utf8'), 'saved');
     const rootId = agent.root.id;
     const names = (await agent.root.agent(context)).tools.map(tool => tool.name);
-    assert.deepEqual(names.sort(), ['read','write','edit','bash','reload_extensions','restart_agent'].sort());
+    assert.deepEqual(names.sort(), ['read','write','edit','bash','restart'].sort());
     await agent.close();
     agent = await openAgent(options);
     assert.equal(agent.root.id, rootId);
